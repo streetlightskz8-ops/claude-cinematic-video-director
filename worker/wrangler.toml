@@ -1,7 +1,13 @@
+
 name = "claude-cinematic-video-director"
 main = "src/index.ts"
-compatibility_date = "2026-11-01"
+compatibility_date = "2026-11-26"
+compatibility_flags = ["nodejs_compat"]
 
-[[r2_buckets]]
-binding = "VIDEO_BUCKET"
-bucket_name = "YOUR_R2_BUCKET"
+[[durable_objects.bindings]]
+name = "VideoDirector"
+class_name = "VideoDirector"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["VideoDirector"]
