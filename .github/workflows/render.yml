@@ -6,7 +6,7 @@ on:
     types: [render_video]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   render:
@@ -14,56 +14,59 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install renderer dependencies
+      - name: Install renderer
         working-directory: renderer
         run: npm install
 
-      - name: Download job payload from R2
+      - name: Prepare job data
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
-          JOB_ID: ${{ github.event.client_payload.job_id }}
+          PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
         run: |
-          aws configure set default.region auto
-          aws s3 cp "s3://${R2_BUCKET_NAME}/${JOB_ID}.json" job.json \
-            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          mkdir -p renderer/public
+          python - <<'PY'
+          import os, json
+          payload = json.loads(os.environ["PAYLOAD_JSON"])
+          with open("renderer/public/scenes.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f, ensure_ascii=False)
+          with open("job.json", "w", encoding="utf-8") as f:
+              json.dump(payload, f, ensure_ascii=False)
+          PY
 
-      - name: Download voice-over and prepare scenes
+      - name: Download voice-over
         run: |
           python -m pip install --quiet gdown
           python - <<'PY'
           import json, re, subprocess
           with open("job.json", encoding="utf-8") as f:
               p = json.load(f)
-          m = re.search(r"[?&]id=([^&]+)", p["audio_url"])
+          m = re.search(r"(?:/d/|id=)([a-zA-Z0-9_-]+)", p["audio_url"])
           if not m:
-              raise SystemExit("Google Drive audio URL tidak valid")
-          subprocess.check_call(["gdown", "--id", m.group(1), "-O", "renderer/public/voiceover.mp3"])
-          with open("renderer/public/scenes.json", "w", encoding="utf-8") as f:
-              json.dump(p, f, ensure_ascii=False)
+              raise SystemExit("Link Google Drive tidak valid")
+          subprocess.check_call([
+              "gdown", "--id", m.group(1),
+              "-O", "renderer/public/voiceover.mp3"
+          ])
           PY
 
       - name: Render MP4
         working-directory: renderer
         run: npm run render
 
-      - name: Upload MP4 to Cloudflare R2
+      - name: Publish MP4 release
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          GH_TOKEN: ${{ github.token }}
           JOB_ID: ${{ github.event.client_payload.job_id }}
+          TITLE: ${{ github.event.client_payload.title }}
         run: |
-          aws configure set default.region auto
-          aws s3 cp out/video.mp4 "s3://${R2_BUCKET_NAME}/${JOB_ID}.mp4" \
-            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-            --content-type "video/mp4"
+          gh release create "video-${JOB_ID}" \
+            "renderer/out/video.mp4#${TITLE:-Cinematic Video}" \
+            --title "${TITLE:-Cinematic Video}" \
+            --notes "Video hasil render otomatis."
