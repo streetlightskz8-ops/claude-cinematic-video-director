@@ -1,0 +1,7 @@
+name = "claude-cinematic-video-director"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+[[r2_buckets]]
+binding = "VIDEO_BUCKET"
+bucket_name = "YOUR_R2_BUCKET"
